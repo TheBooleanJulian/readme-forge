@@ -105,7 +105,7 @@
     <div class="hint">Token is only used for this request, never stored. Needed only for private repos or to avoid rate limits.</div>
 
     <div class="status" id="status">
-      <div class="step" id="step-fetch"><span class="dot"></span> Reading repo metadata &amp; file tree</div>
+      <div class="step" id="step-fetch"><span class="dot"></span> Reading repo metadata, file tree &amp; commit history</div>
       <div class="step" id="step-detect"><span class="dot"></span> Detecting stack &amp; existing README</div>
       <div class="step" id="step-write"><span class="dot"></span> Writing README from template</div>
     </div>
@@ -208,6 +208,12 @@ var TEMPLATE = [
 '',
 '- [x] Core feature working',
 '- [ ] Next thing planned',
+'',
+'## Changelog',
+'',
+"Summarised from commit history, most recent first. Not a full log.",
+'',
+'- **[recent period]** — summary of what changed',
 '',
 '## License',
 '',
@@ -324,11 +330,13 @@ async function generate() {
     var results = await Promise.all([
       ghFetch(base, token),
       ghFetch(base + '/languages', token),
-      ghFetch(base + '/contents', token).catch(function() { return []; })
+      ghFetch(base + '/contents', token).catch(function() { return []; }),
+      ghFetch(base + '/commits?per_page=30', token).catch(function() { return []; })
     ]);
     var meta = results[0];
     var languages = results[1];
     var contents = results[2];
+    var commits = results[3];
     setStep('step-fetch', 'done');
 
     setStep('step-detect', 'active-step');
@@ -354,6 +362,15 @@ async function generate() {
     try {
       heroImagePath = await findHeroImage(base, token, contents);
     } catch (e) { /* no hero image found, fine */ }
+
+    var commitLogBlock = '(no commit history available)';
+    if (Array.isArray(commits) && commits.length) {
+      commitLogBlock = commits.map(function(c) {
+        var msg = (c.commit && c.commit.message ? c.commit.message.split('\n')[0] : '').slice(0, 120);
+        var date = (c.commit && c.commit.author && c.commit.author.date) ? c.commit.author.date.slice(0, 10) : '';
+        return date + ' — ' + msg;
+      }).join('\n');
+    }
 
     setStep('step-detect', 'done');
     setStep('step-write', 'active-step');
@@ -382,6 +399,9 @@ async function generate() {
       '',
       'HERO IMAGE: ' + (heroImagePath ? heroImagePath : '(no screenshot/hero/demo/banner image found in root, assets/, docs/, .github/, screenshots/, images/, or img/)'),
       '',
+      'COMMIT HISTORY (most recent 30, oldest last):',
+      commitLogBlock,
+      '',
       'EXISTING README (for reference only, reuse real facts/content from it, do not just copy structure):',
       existingReadme ? existingReadme.slice(0, 4000) : '(no existing README found)'
     ].join('\n');
@@ -396,6 +416,7 @@ async function generate() {
       '- Write a tight, concrete "What it does" paragraph and a real features list based on the existing README and file names if available.\n' +
       "- If there's no existing README and the file listing is sparse, keep sections short rather than padding with generic filler, leave placeholder brackets like [describe X] only where truly nothing can be inferred.\n" +
       "- Hero image: use the HERO IMAGE path given in REPO DATA below verbatim in the image markdown (e.g. ![Hero screenshot](<path>)). If HERO IMAGE says none was found, DELETE the hero image line entirely, do not invent or guess a path like assets/hero.png.\n" +
+      "- Changelog: read COMMIT HISTORY and write 3-8 bullets that SUMMARISE the real work into meaningful, grouped entries (e.g. group several related commits into one bullet about what actually changed from a user's perspective). Do not just copy raw commit messages 1:1, skip trivial commits (typo fixes, merge commits, 'wip', formatting-only). Order most recent first. If COMMIT HISTORY says none available, delete the whole Changelog section.\n" +
       "- Output ONLY the final README.md markdown. No preamble, no commentary, no code fence wrapping the whole output.\n\n" +
       "REPO DATA:\n" + repoContext;
 
