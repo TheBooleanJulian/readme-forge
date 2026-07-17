@@ -246,7 +246,7 @@ function buildPrompt(repoContext) {
 }
 
 app.use(express.json({ limit: '100kb' }));
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
 var generateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -307,6 +307,7 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
 });
 
 app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
