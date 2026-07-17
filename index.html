@@ -359,20 +359,15 @@ async function generate() {
       "- Output ONLY the final README.md markdown. No preamble, no commentary, no code fence wrapping the whole output.\n\n" +
       "REPO DATA:\n" + repoContext;
 
-    var response = await fetch("https://api.anthropic.com/v1/messages", {
+    var response = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4000,
-        messages: [{ role: "user", content: prompt }]
-      })
+      body: JSON.stringify({ prompt: prompt })
     });
 
-    if (!response.ok) throw new Error('Claude API error: ' + response.status);
     var data = await response.json();
-    var textBlocks = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; });
-    var md = textBlocks.join('\n').trim();
+    if (!response.ok) throw new Error(data.error || ('Claude API error: ' + response.status));
+    var md = (data.text || '').trim();
     md = md.replace(/^```(?:markdown|md)?\n/, '').replace(/\n```$/, '');
 
     setStep('step-write', 'done');

@@ -1,0 +1,13 @@
+{
+  "name": "readme-forge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Drop a GitHub repo link in, get a README written from a template.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
