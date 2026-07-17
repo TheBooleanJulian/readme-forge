@@ -13,16 +13,19 @@
 
 ---
 
+![Hero screenshot](assets/hero.png)
+
 ## What it does
 
-readme-forge takes a GitHub repo link and generates a structured README using a consistent template, powered by the Claude API. It's a single-page tool aimed at developers who want a solid, opinionated README without writing it from scratch — particularly useful across a fleet of repos that share a common style.
+readme-forge takes a GitHub repo link and generates a structured README using a consistent template, powered by the Claude API. It's a single-page tool aimed at developers who want a solid, opinionated README without writing it from scratch — particularly useful across a fleet of repos that share a common style. Paste a URL, get a README in seconds.
 
 ## Features
 
 - Paste a GitHub repo URL and generate a README in seconds
-- Claude API-powered generation following a fixed template
-- Express backend proxies Claude API calls, keeping credentials server-side
+- Claude API-powered generation following a fixed, opinionated template
+- Express backend proxies Claude API calls with rate limiting, keeping credentials server-side
 - Single-file HTML frontend — no build step required
+- Hero image path detection and changelog generation built into the template output
 
 ## Tech Stack
 
@@ -55,6 +58,7 @@ readme-forge/
 |-- index.html
 |-- server.js
 |-- package.json
+|-- .env.example
 `-- .gitignore
 ```
 
@@ -62,14 +66,15 @@ readme-forge/
 
 - [x] Single-page UI with repo URL input
 - [x] Express backend proxying Claude API
+- [x] Rate limiting on `/api/generate`
 - [x] Hero image detection in generated output
 - [x] Changelog section generated from commit history
 - [ ] Support for private repos via PAT
-- [ ] Hosted public version
 
 ## Changelog
 
-- **July 2026** — Added changelog section generated from commit history; added `@TheBooleanJulian` footer credit and real hero image path detection into the template output
+- **July 2026** — Locked down `/api/generate` with server-owned prompt and rate limiting via `express-rate-limit`
+- **July 2026** — Added changelog section generated from commit history; added `@TheBooleanJulian` footer credit and real hero image path detection into template output; added hero screenshot and `.env.example`
 - **July 2026** — Added Express backend (`server.js`) to proxy Claude API calls server-side
 - **July 2026** — Renamed entry point to `index.html` for static hosting compatibility; initial project scaffold
 
