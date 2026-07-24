@@ -19,6 +19,7 @@ var TEMPLATE = [
 '',
 "**One-line pitch: what it does and who it's for.**",
 '',
+'![Version](https://img.shields.io/badge/version-0.1.0-00D4C8)',
 '![Python](https://img.shields.io/badge/-Python-3776AB?logo=python&logoColor=white)',
 '![FastAPI](https://img.shields.io/badge/-FastAPI-009688?logo=fastapi&logoColor=white)',
 '![SQLite](https://img.shields.io/badge/-SQLite-003B57?logo=sqlite&logoColor=white)',
@@ -80,8 +81,13 @@ var TEMPLATE = [
 '',
 '## Status / Roadmap',
 '',
+'**Done**',
+'',
 '- [x] Core feature working',
-'- [ ] Next thing planned',
+'',
+'**Planned / Suggestions**',
+'',
+'- Next thing planned or a concrete gap worth addressing',
 '',
 '## Changelog',
 '',
@@ -158,12 +164,14 @@ async function buildRepoContext(owner, repo, token) {
     ghFetch(base, token),
     ghFetch(base + '/languages', token),
     ghFetch(base + '/contents', token).catch(function() { return []; }),
-    ghFetch(base + '/commits?per_page=30', token).catch(function() { return []; })
+    ghFetch(base + '/commits?per_page=30', token).catch(function() { return []; }),
+    ghFetch(base + '/tags?per_page=5', token).catch(function() { return []; })
   ]);
   var meta = results[0];
   var languages = results[1];
   var contents = results[2];
   var commits = results[3];
+  var tags = results[4];
 
   var fileNames = Array.isArray(contents) ? contents.map(function(f) { return f.name; }) : [];
 
@@ -187,6 +195,8 @@ async function buildRepoContext(owner, repo, token) {
   try {
     heroImagePath = await findHeroImage(base, token, contents);
   } catch (e) { /* no hero image found, fine */ }
+
+  var latestTag = (Array.isArray(tags) && tags.length && tags[0].name) ? tags[0].name : null;
 
   var commitLogBlock = '(no commit history available)';
   if (Array.isArray(commits) && commits.length) {
@@ -221,6 +231,8 @@ async function buildRepoContext(owner, repo, token) {
     '',
     'HERO IMAGE: ' + (heroImagePath ? heroImagePath : '(no screenshot/hero/demo/banner image found in root, assets/, docs/, .github/, screenshots/, images/, or img/)'),
     '',
+    'LATEST GIT TAG: ' + (latestTag ? latestTag : '(no tags found — infer a reasonable version from commit history/changelog instead)'),
+    '',
     'COMMIT HISTORY (most recent 30, oldest last):',
     commitLogBlock,
     '',
@@ -241,6 +253,8 @@ function buildPrompt(repoContext) {
     "- If there's no existing README and the file listing is sparse, keep sections short rather than padding with generic filler, leave placeholder brackets like [describe X] only where truly nothing can be inferred.\n" +
     "- Hero image: use the HERO IMAGE path given in REPO DATA below verbatim in the image markdown (e.g. ![Hero screenshot](<path>)). If HERO IMAGE says none was found, DELETE the hero image line entirely, do not invent or guess a path like assets/hero.png.\n" +
     "- Changelog: read COMMIT HISTORY and write 3-8 bullets that SUMMARISE the real work into meaningful, grouped entries (e.g. group several related commits into one bullet about what actually changed from a user's perspective). Do not just copy raw commit messages 1:1, skip trivial commits (typo fixes, merge commits, 'wip', formatting-only). Order most recent first. If COMMIT HISTORY says none available, delete the whole Changelog section.\n" +
+    "- Version badge: if LATEST GIT TAG is present, use that exact tag (strip a leading 'v' for the badge number, e.g. tag v2.3.0 -> badge text 2.3.0) — this is a real release, state it as-is. If no tag was found, infer a reasonable unofficial version from the commit history: look for conventional-commit prefixes (feat:, fix:, breaking/BREAKING CHANGE) to reason about major/minor/patch, or if commits aren't conventional-style, estimate from how many distinct feature groups appear in your Changelog (start around 0.1.0 for a young repo). Update the badge text accordingly. Never fabricate a precise-looking version with no basis — when inferring, keep it a round, defensible number.\n" +
+    "- Roadmap: split '## Status / Roadmap' into a 'Done' list (checked items evidently working, based on real features/config found) and a 'Planned / Suggestions' list. For suggestions, only list concrete, evidenced gaps — e.g. no test files found, no CI config, no .env.example despite env vars in code, no error handling visible, no LICENSE file despite a license badge. Do not invent a feature roadmap or business-y suggestions with no evidence. If genuinely nothing concrete to suggest, keep it to 1-2 modest items rather than padding.\n" +
     "- Output ONLY the final README.md markdown. No preamble, no commentary, no code fence wrapping the whole output.\n\n" +
     "REPO DATA:\n" + repoContext;
 }
