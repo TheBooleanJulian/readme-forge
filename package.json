@@ -1,14 +1,12 @@
 {
   "name": "readme-forge",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
+  "type": "module",
   "description": "Drop a GitHub repo link in, get a README written from a template.",
-  "main": "server.js",
   "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "express-rate-limit": "^7.4.1"
+    "dev": "npx wrangler dev",
+    "test": "node --test",
+    "deploy": "npx wrangler deploy"
   }
 }

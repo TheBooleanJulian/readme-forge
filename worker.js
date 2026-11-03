@@ -1,10 +1,12 @@
-const express = require('express');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+// readme-forge on Cloudflare Workers (replaces the Express server.js that ran on Zeabur).
+//
+//   POST /api/generate   { owner, repo, token? } → { text, owner, repo } | { error }
+//   GET  /healthz        liveness + whether the gateway binding is present
+//   everything else      public/index.html (static assets)
+//
+// No model keys here: the prompt goes to thebooleanjulian-llm over the LLM service binding. Public repos use the
+// `readme-generate` use case; private repos (read with the visitor's own token) use `readme-generate-private`,
+// which the gateway never routes to the free pool. Per-visitor rate limit: GENERATE_LIMIT binding (by IP).
 
 var TEMPLATE = [
 '<!-- ',
@@ -125,7 +127,7 @@ async function ghFetch(url, token) {
 
 async function tryFetchRaw(downloadUrl) {
   try {
-    var res = await fetch(downloadUrl);
+    var res = await fetch(downloadUrl, { headers: { 'User-Agent': 'readme-forge' } });
     if (!res.ok) return null;
     var text = await res.text();
     return text.length > 6000 ? text.slice(0, 6000) + '\n...[truncated]' : text;
@@ -157,7 +159,8 @@ async function findHeroImage(base, token, rootContents) {
   return null;
 }
 
-async function buildRepoContext(owner, repo, token) {
+// Returns { context, isPrivate }: the prompt's REPO DATA block, and whether GitHub says the repo is private.
+export async function buildRepoContext(owner, repo, token) {
   var base = 'https://api.github.com/repos/' + owner + '/' + repo;
 
   var results = await Promise.all([
@@ -213,7 +216,7 @@ async function buildRepoContext(owner, repo, token) {
   }
   if (!detectedFilesBlock) detectedFilesBlock = '(none found in root)';
 
-  return [
+  var context = [
     'REPO METADATA:',
     '- Name: ' + meta.name,
     '- Description: ' + (meta.description || '(none set)'),
@@ -239,9 +242,11 @@ async function buildRepoContext(owner, repo, token) {
     'EXISTING README (for reference only, reuse real facts/content from it, do not just copy structure):',
     existingReadme ? existingReadme.slice(0, 4000) : '(no existing README found)'
   ].join('\n');
+
+  return { context: context, isPrivate: meta.private === true };
 }
 
-function buildPrompt(repoContext) {
+export function buildPrompt(repoContext) {
   return "You are generating a README.md for a GitHub repo, strictly following the template below. This is for TheBooleanJulian's (Julian) repo fleet, mostly Python/FastAPI/SQLite backends, single-file HTML frontends, Telegram bots (python-telegram-bot, polling), React/Vite frontends, deployed on Zeabur via GitHub CI/CD (feature -> dev -> main branching).\n\n" +
     "TEMPLATE TO FOLLOW:\n" + TEMPLATE + "\n\n" +
     "RULES:\n" +
@@ -259,72 +264,66 @@ function buildPrompt(repoContext) {
     "REPO DATA:\n" + repoContext;
 }
 
-app.use(express.json({ limit: '100kb' }));
-app.use(express.static(__dirname, { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
+const json = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 
-var generateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many README generations from this IP. Try again later.' }
-});
+async function generate(request, env) {
+  if (!env.LLM) return json({ error: 'Server is missing the LLM gateway binding.' }, 500);
 
-app.post('/api/generate', generateLimiter, async (req, res) => {
-  if (!ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'Server is missing ANTHROPIC_API_KEY.' });
+  var ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (env.GENERATE_LIMIT) {
+    var limit = await env.GENERATE_LIMIT.limit({ key: ip });
+    if (!limit.success) return json({ error: 'Too many README generations from this IP. Try again later.' }, 429);
   }
 
-  var owner = req.body && req.body.owner;
-  var repo = req.body && req.body.repo;
-  var token = req.body && req.body.token;
+  var body = await request.json().catch(function() { return null; });
+  var owner = body && body.owner;
+  var repo = body && body.repo;
+  var token = body && body.token;
 
   if (typeof owner !== 'string' || typeof repo !== 'string' || !REPO_NAME_RE.test(owner) || !REPO_NAME_RE.test(repo)) {
-    return res.status(400).json({ error: 'Invalid owner/repo.' });
+    return json({ error: 'Invalid owner/repo.' }, 400);
   }
   if (token && typeof token !== 'string') {
-    return res.status(400).json({ error: 'Invalid token.' });
+    return json({ error: 'Invalid token.' }, 400);
   }
 
   try {
-    var repoContext = await buildRepoContext(owner, repo, token);
-    var prompt = buildPrompt(repoContext);
-
-    var response = await fetch('https://api.anthropic.com/v1/messages', {
+    var built = await buildRepoContext(owner, repo, token);
+    var res = await env.LLM.fetch('https://llm/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
+        'X-TBJ-Service': 'readme-forge',
+        'X-TBJ-Use-Case': built.isPrivate ? 'readme-generate-private' : 'readme-generate'
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: prompt }]
-      })
+      body: JSON.stringify({ messages: [{ role: 'user', content: buildPrompt(built.context) }], max_tokens: 4000 })
     });
-
-    var data = await response.json();
-    if (!response.ok) {
-      var message = (data && data.error && data.error.message) || ('Claude API error: ' + response.status);
-      return res.status(response.status).json({ error: message });
+    var data = await res.json().catch(function() { return null; });
+    if (!res.ok) {
+      var code = (data && data.error && data.error.code) || res.status;
+      console.log(JSON.stringify({ svc: 'readme-forge', gateway_status: res.status, code: code, trace: res.headers.get('x-tbj-trace-id') }));
+      return json({ error: 'README generation failed (' + code + '). Try again in a minute.' }, 502);
     }
 
-    var textBlocks = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text);
-    var md = textBlocks.join('\n').trim();
+    var md = ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim();
     md = md.replace(/^```(?:markdown|md)?\n/, '').replace(/\n```$/, '');
-
-    res.json({ text: md, owner: owner, repo: repo });
+    return json({ text: md, owner: owner, repo: repo });
   } catch (err) {
-    res.status(502).json({ error: err.message || 'Something went wrong.' });
+    return json({ error: err.message || 'Something went wrong.' }, 502);
   }
-});
+}
 
-app.get('*', (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache');
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.listen(PORT, () => {
-  console.log('readme-forge listening on port ' + PORT);
-});
+export default {
+  async fetch(request, env) {
+    var url = new URL(request.url);
+    if (url.pathname === '/api/generate') {
+      if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+      return generate(request, env);
+    }
+    if (url.pathname === '/healthz') {
+      return json({ status: 'pass', gateway: env.LLM ? 'bound' : 'missing' });
+    }
+    return env.ASSETS.fetch(request);
+  }
+};
