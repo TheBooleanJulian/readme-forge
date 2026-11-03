@@ -1,0 +1,22 @@
+{
+  // readme-forge on Cloudflare Workers (replaces server.js on Zeabur). No secrets: model calls go through
+  // thebooleanjulian-llm over the LLM service binding, so the Anthropic key lives only in the gateway.
+  "name": "readme-forge",
+  "account_id": "c580c4403524273d1bece674117472dd",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/healthz"]
+  },
+  "services": [{ "binding": "LLM", "service": "thebooleanjulian-llm" }],
+  // Per-IP limit on /api/generate. The old Express limit was 10 per 15 min; the binding only takes 10 s or 60 s
+  // periods, so 2 per minute is the closest equivalent.
+  "ratelimits": [{ "name": "GENERATE_LIMIT", "namespace_id": "1101", "simple": { "limit": 2, "period": 60 } }],
+  // Overrides the *.thebooleanjulian.dev wildcard (Zeabur). Rollback: remove and redeploy.
+  "routes": [{ "pattern": "readme-forge.thebooleanjulian.dev", "custom_domain": true }],
+  "observability": { "enabled": true }
+}
